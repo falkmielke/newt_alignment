@@ -28,7 +28,6 @@ knitr:
 ```{sh setup-virtual-environment}
 #| eval: false
 python -m venv newts
-source newts/bin/activate.fish
 ```
 
 ```{sh python-packages}
@@ -41,11 +40,24 @@ pip install --upgrade pip
 pip install --upgrade -r requirements.txt
 ```
 
+# start python
+
+```{sh start-python}
+#| eval: false
+source newts/bin/activate.fish
+python
+
+```
+
 ```{python libraries}
 import numpy as np
 import scipy.ndimage as ndi
 import skimage.io as skiio
 import skimage.color as skicol
+import skimage.filters as skifilt
+import skimage.morphology as skimorph
+import skimage.measure as skimeas
+import skimage.segmentation as skiseg
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
@@ -72,8 +84,11 @@ plt.show()
 
 note:
 
-- on the red channel, the blue marker text vanishes
+- yellow gets best contrast on "red" channel
+- on the red channel, the red marker text vanishes :)
 - on the blue channel, the whole animal is black!
+- petri dish is overexposed on all channels for this image
+
 
 ```{python split-channels}
 
@@ -81,10 +96,14 @@ fig, axarr = plt.subplots(1, 3)
 
 for i in range(3):
     axarr[i].imshow(img[:,:,i], cmap = "grey")
+    axarr[i].set_axis_off()
+    axarr[i].set_title("RGB"[i])
 
 plt.show()
 ```
 
+
+## hsv
 
 There are other [color](https://scikit-image.org/docs/stable/api/skimage.color.html) 
 spaces, [e.g.](https://en.wikipedia.org/wiki/HSL_and_HSV)
@@ -97,13 +116,19 @@ fig, axarr = plt.subplots(1, 3)
 
 for i in range(3):
     axarr[i].imshow(img_hsv[:,:,i], cmap = "grey")
+    axarr[i].set_axis_off()
+    axarr[i].set_title("HSV"[i])
 
 
 plt.show()
 ```
 
 
-and luma/chroma [yuv](https://en.wikipedia.org/wiki/Y%E2%80%B2UV)
+
+
+## yuv
+
+luma/chroma [yuv](https://en.wikipedia.org/wiki/Y%E2%80%B2UV)
 
 
 ```{python convert-yuv}
@@ -113,7 +138,205 @@ fig, axarr = plt.subplots(1, 3)
 
 for i in range(3):
     axarr[i].imshow(img_yuv[:,:,i], cmap = "grey")
+    axarr[i].set_axis_off()
 
 
 plt.show()
 ```
+
+## inverting!
+
+Remember that you can invert the channels!
+When looking for good channels to separate the newt from the background, look for dark *and* light.
+
+```{python invert-hsv}
+
+fig, ax = plt.subplots(1, 1)
+
+ax.imshow(1.-img_hsv[:,:,2], cmap = "grey")
+ax.set_axis_off()
+ax.set_title("inverted V")
+
+
+plt.show()
+```
+
+## improvement
+
+If you want to do even better:
+
+- find the dish
+- fill "holes"
+- blank region outside the dish
+- then find the newt again.
+
+
+```{python close-petri-dish}
+
+mod = img_hsv[:,:,2] # the "V" channel
+
+# apply threshold
+thresh = (1.+skifilt.threshold_otsu(mod))/2 # good old otsu is just too low :)
+
+bw = skimorph.closing(mod > thresh,
+                      skimorph.footprint_rectangle((17, 17)))
+# plt.imshow(bw); plt.show()
+
+# bw = skimorph.area_opening(bw, area_threshold = 8)
+
+# label image regions
+label_image = skimorph.label(bw)
+
+biggest = np.argmax([region.area for region in skimeas.regionprops(label_image)])
+mask = skimorph.convex_hull_image(label_image == int(1+biggest))
+# to make the background transparent, pass the value of `bg_label`,
+# and leave `bg_color` as `None` and `kind` as `overlay`
+image_label_overlay = skicol.label2rgb(mask, image=img, bg_label=0)
+
+
+fig, ax = plt.subplots(1, 1)
+
+ax.imshow(image_label_overlay)
+ax.set_axis_off()
+ax.set_title("petri dish mask")
+
+plt.show()
+```
+
+
+```{python mask-image}
+img_masked = img_hsv[:, :, 2]
+img_masked[np.logical_not(mask)] = 1.
+
+fig, ax = plt.subplots(1, 1)
+
+ax.imshow(img_masked, cmap = "grey")
+ax.set_axis_off()
+ax.set_title("petri dish only")
+
+plt.show()
+```
+
+
+# Image Differentials
+
+First of all, we can subtract channels:
+
+```{python rb-diff}
+diff_img = img[:,:,0]-img[:,:,2]
+
+fig, ax = plt.subplots(1, 1)
+
+ax.imshow(diff_img, cmap = "grey")
+ax.set_axis_off()
+ax.set_title("red minus blue")
+
+plt.show()
+```
+
+... but the problem is the background.
+It might work better with some blur, though (not tested).
+
+
+Then, there are spatial differentials:
+
+```{python edge-sobel}
+img_edge_sobel = skifilt.sobel(img)
+
+fig, axarr = plt.subplots(1, 2)
+
+axarr[0].imshow(img_edge_sobel, cmap = "grey")
+axarr[0].set_axis_off()
+axarr[0].set_title("sobel edge filter")
+
+axarr[1].imshow(img_edge_sobel[:, :, 2], cmap = "grey")
+axarr[1].set_axis_off()
+axarr[1].set_title("blue channel of the sobel")
+
+plt.show()
+```
+
+
+## not pursued
+
+the image could be scaled down
+`image_rescaled = rescale(image, 0.25, anti_aliasing=False)`
+
+or better, apply some gaussian blur to smear out the non-newt contrast edges of the petri dish.
+
+
+
+
+# Segmentation
+
+... is just a name for the process of finding things in the image, 
+separating "the relevant" from "the irrelevant" (no offence to petri dish manufacturers).
+
+- <https://scikit-image.org/docs/stable/auto_examples/segmentation/plot_label.html#sphx-glr-auto-examples-segmentation-plot-label-py>
+
+
+```{python labels}
+#| eval: false
+
+mod = 1. - img_masked
+
+# apply threshold
+thresh = skifilt.threshold_otsu(mod) # good old otsu :)
+bw = skimorph.closing(mod > thresh,
+                      skimorph.footprint_rectangle((17, 17)))
+
+# label image regions
+label_image = skimorph.label(bw)
+biggest = np.argmax([region.area for region in skimeas.regionprops(label_image)])
+newt_mask = label_image == int(1+biggest)
+
+image_label_overlay = skicol.label2rgb(newt_mask, image=mod, bg_label=0)
+
+fig, ax = plt.subplots(1, 1)
+
+ax.imshow(image_label_overlay)
+ax.set_axis_off()
+ax.set_title("lonely newt")
+
+plt.show()
+```
+
+
+... or immediately turn to the fancy stuff?
+- <https://scikit-image.org/docs/stable/auto_examples/segmentation/plot_morphsnakes.html#sphx-glr-auto-examples-segmentation-plot-morphsnakes-py>
+
+```{python snakes-for-newts}
+#| eval: false
+
+mod = 1. - img_masked # the inverted "V" channel
+
+init_ls = skiseg.checkerboard_level_set(mod.shape, 8)
+
+# fig, ax = plt.subplots(1, 1)
+# ax.imshow(init_ls)
+# ax.set_axis_off()
+# ax.set_title("init")
+# plt.show()
+
+
+ls = skiseg.morphological_chan_vese(
+    mod,
+    num_iter=16,
+    init_level_set=init_ls,
+    smoothing=11
+)
+
+fig, ax = plt.subplots(1, 1)
+
+ax.imshow(ls)
+ax.set_axis_off()
+ax.set_title("morphological snakes")
+
+plt.show()
+```
+
+Oh, wow, that takes a bit, but the result is mildly promising.
+
+
+Anyways, I will stick with the "simple newt label" for now.
+

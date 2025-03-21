@@ -72,7 +72,8 @@ mpl.use("gtk4agg")
 ## raw
 
 ```{python load-image}
-image_file = "Triturus cristatus_female_4_2025-03-17_106_IMG_9269.JPG"
+#image_file = "Triturus cristatus_female_4_2025-03-17_106_IMG_9269.JPG"
+image_file = "Triturus cristatus_male_4_2025-03-18_161_IMG_9396.JPG"
 img = skiio.imread(image_file)
 
 plt.imshow(img, origin = "upper") # , cmap = "gray"
@@ -163,7 +164,7 @@ plt.show()
 
 ## improvement
 
-If you want to do even better:
+We can use the fact that the dish is the biggest object in the picture:
 
 - find the dish
 - fill "holes"
@@ -175,11 +176,14 @@ If you want to do even better:
 
 mod = img_hsv[:,:,2] # the "V" channel
 
+# plt.hist(mod.ravel(), bins = 256); plt.show()
+
 # apply threshold
-thresh = (1.+skifilt.threshold_otsu(mod))/2 # good old otsu is just too low :)
+# thresh = (1.+skifilt.threshold_otsu(mod))/2 # good old otsu is just too low :)
+thresh = 0.98 #np.quantile(mod, [0.8])[0] # Otsu is just a simple histogram method...
 
 bw = skimorph.closing(mod > thresh,
-                      skimorph.footprint_rectangle((17, 17)))
+                      skimorph.footprint_rectangle((5, 5)))
 # plt.imshow(bw); plt.show()
 
 # bw = skimorph.area_opening(bw, area_threshold = 8)
@@ -188,6 +192,7 @@ bw = skimorph.closing(mod > thresh,
 label_image = skimorph.label(bw)
 
 biggest = np.argmax([region.area for region in skimeas.regionprops(label_image)])
+# plt.imshow(label_image == int(1+biggest)); plt.show()
 mask = skimorph.convex_hull_image(label_image == int(1+biggest))
 # to make the background transparent, pass the value of `bg_label`,
 # and leave `bg_color` as `None` and `kind` as `overlay`
@@ -276,7 +281,6 @@ separating "the relevant" from "the irrelevant" (no offence to petri dish manufa
 
 
 ```{python labels}
-#| eval: false
 
 mod = 1. - img_masked
 
@@ -290,7 +294,7 @@ label_image = skimorph.label(bw)
 biggest = np.argmax([region.area for region in skimeas.regionprops(label_image)])
 newt_mask = label_image == int(1+biggest)
 
-image_label_overlay = skicol.label2rgb(newt_mask, image=mod, bg_label=0)
+image_label_overlay = skicol.label2rgb(newt_mask, image=img, bg_label=0)
 
 fig, ax = plt.subplots(1, 1)
 

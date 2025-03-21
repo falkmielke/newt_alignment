@@ -1,0 +1,119 @@
+---
+title: "Affine Newt Alignment"
+subtitle: "Newt affine alignment for newt affine aligners."
+format:
+  html:
+    toc: true
+    html-math-method: katex
+    code-fold: false
+    embed-resources: true
+knitr:
+  opts_chunk:
+    echo: true
+---
+
+
+# Procedure
+
+- load image
+- exposure normalization
+- find features (blobs? yellow?)
+- rotate rostro-caudal axis
+- crop
+- save
+
+
+# pyenv
+
+```{sh setup-virtual-environment}
+#| eval: false
+python -m venv newts
+source newts/bin/activate.fish
+```
+
+```{sh python-packages}
+#| eval: false
+source newts/bin/activate.fish
+pip install --upgrade pip
+
+# pip install --upgrade numpy scipy pandas matplotlib scikit-image pygobject
+# pip freeze > requirements.txt
+pip install --upgrade -r requirements.txt
+```
+
+```{python libraries}
+import numpy as np
+import scipy.ndimage as ndi
+import skimage.io as skiio
+import skimage.color as skicol
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+
+# mpl.use("TkAgg")
+mpl.use("gtk4agg")
+
+```
+
+
+# load image
+
+## raw
+
+```{python load-image}
+image_file = "Triturus cristatus_female_4_2025-03-17_106_IMG_9269.JPG"
+img = skiio.imread(image_file)
+
+plt.imshow(img, origin = "upper") # , cmap = "gray"
+plt.show()
+```
+
+
+## three channels
+
+note:
+
+- on the red channel, the blue marker text vanishes
+- on the blue channel, the whole animal is black!
+
+```{python split-channels}
+
+fig, axarr = plt.subplots(1, 3)
+
+for i in range(3):
+    axarr[i].imshow(img[:,:,i], cmap = "grey")
+
+plt.show()
+```
+
+
+There are other [color](https://scikit-image.org/docs/stable/api/skimage.color.html) 
+spaces, [e.g.](https://en.wikipedia.org/wiki/HSL_and_HSV)
+hsv (<https://stackoverflow.com/a/54632519>)
+
+```{python convert-hsv}
+img_hsv = skicol.rgb2hsv(img)
+
+fig, axarr = plt.subplots(1, 3)
+
+for i in range(3):
+    axarr[i].imshow(img_hsv[:,:,i], cmap = "grey")
+
+
+plt.show()
+```
+
+
+and luma/chroma [yuv](https://en.wikipedia.org/wiki/Y%E2%80%B2UV)
+
+
+```{python convert-yuv}
+img_yuv = skicol.rgb2yuv(img)
+
+fig, axarr = plt.subplots(1, 3)
+
+for i in range(3):
+    axarr[i].imshow(img_yuv[:,:,i], cmap = "grey")
+
+
+plt.show()
+```

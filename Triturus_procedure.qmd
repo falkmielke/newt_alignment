@@ -52,6 +52,7 @@ python
 ```{python libraries}
 import numpy as np
 import scipy.ndimage as ndi
+import scipy.signal as sig
 import skimage.io as skiio
 import skimage.color as skicol
 import skimage.filters as skifilt
@@ -328,5 +329,131 @@ Anyways, I will stick with the "simple newt label" for now.
 
 
 # Cropping
+
+We can convert image masks to a list of coordinates.
+For example, with the newt mask:
+
+```{python bbox-and-cropping}
+
+def get_bbox(mask):
+    mask_coords = np.stack(np.where(mask), axis = 1)
+    bbox = {
+        "min_x": np.min(mask_coords[:, 0]),
+        "max_x": np.max(mask_coords[:, 0]),
+        "min_y": np.min(mask_coords[:, 1]),
+        "max_y": np.max(mask_coords[:, 1])
+    }
+    return(bbox)
+
+def extend_bbox(bbox, pixels = 0):
+    return {key: bound + (-1 if "min" in key else +1) * pixels \
+            for key, bound in bbox.items()}
+
+
+def crop(img, bx):
+    if len(img.shape) == 3:
+        return(img[bx["min_x"]:bx["max_x"], bx["min_y"]:bx["max_y"], :])
+    if len(img.shape) == 2:
+        return(img[bx["min_x"]:bx["max_x"], bx["min_y"]:bx["max_y"]])
+
+def crop_mask(img, mask, return_crop_mask = False, extend_px = 0):
+    bbox = extend_bbox(get_bbox(mask), extend_px)
+    cropped_img = crop(img, bbox)
+
+    if return_crop_mask:
+        cropped_mask = crop(mask, bbox)
+        return(cropped_img, cropped_mask)
+
+    return cropped_img
+
+
+```
+
+
+Apply like this:
+
+```{python crop-newt}
+cropped_newt, cropped_mask = crop_mask(img, newt_mask, return_crop_mask = True, extend_px = 100)
+
+newt_label_overlay = skicol.label2rgb(cropped_mask, image=cropped_newt, bg_label=0)
+
+show(newt_label_overlay, title = "the cropped newt and its cropped mask")
+plt.show()
+
+```
+
+
+With the channel tricks shown above, you can find one that only selects the yellow on the belly.
+"Saturation" might be a good one?
+
+```{python find-the-yellow-1}
+
+newt_hsv = skicol.rgb2hsv(cropped_newt)
+
+saturation = newt_hsv[:, :, 1]
+# show(saturation); plt.show()
+otsu = skifilt.threshold_otsu(saturation)
+
+blurred_saturation = skifilt.gaussian(saturation, sigma = 4)
+# show(blurred_saturation); plt.show()
+
+plt.hist(blurred_saturation.ravel(), bins = 256)
+plt.axvline(otsu)
+plt.show()
+
+```
+
+As so often, Otsu threshold is probably too low.
+
+Can we find our own threshold? Aye!
+How about that histogram peak?
+
+```{python relmax-threshold}
+bins, edges = np.histogram(blurred_saturation.ravel(), bins = 256)
+histogram_change = np.diff(bins)
+
+# plt.step(edges[1:-1], histogram_change); plt.show()
+
+downbins = sig.argrelmin(histogram_change)[0]
+downbin_values = histogram_change[downbins]
+right_ramp_bin = downbins[downbin_values < -5000][-1]
+
+threshold = edges[right_ramp_bin] + 0.1
+
+plt.hist(saturation.ravel(), bins = 256)
+plt.axvline(threshold)
+plt.show()
+
+
+```
+
+
+```{python find-the-yellow-2}
+yellow_mask = skimorph.closing(
+    np.logical_and(cropped_mask, blurred_saturation > threshold),
+    skimorph.footprint_rectangle((5, 5))
+)
+
+
+newt_yellow_overlay = skicol.label2rgb(
+    np.array(cropped_mask, dtype = int) +
+    np.array(yellow_mask, dtype = int)
+    , image=cropped_newt, bg_label=0)
+
+show(newt_yellow_overlay); plt.show()
+
+```
+
+We got the yellow, we got the animal, let's do something with it!
+
+
+# Rotation
+
+The coordinates of the yellow ventral marking give a good general direction.
+And the crop range.
+
+But first, bring that direction to a default by rotating it.
+
+
 
 

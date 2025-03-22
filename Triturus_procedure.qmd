@@ -51,6 +51,7 @@ python
 
 ```{python libraries}
 import numpy as np
+import pandas as pd
 import scipy.ndimage as ndi
 import scipy.signal as sig
 import skimage.io as skiio
@@ -59,6 +60,7 @@ import skimage.filters as skifilt
 import skimage.morphology as skimorph
 import skimage.measure as skimeas
 import skimage.segmentation as skiseg
+import skimage.transform as skitrafo
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
@@ -95,8 +97,8 @@ def show(img, ax = None, **kwargs):
 ## raw
 
 ```{python load-image}
-#image_file = "Triturus cristatus_female_4_2025-03-17_106_IMG_9269.JPG"
-image_file = "Triturus cristatus_male_4_2025-03-18_161_IMG_9396.JPG"
+image_file = "Triturus cristatus_female_4_2025-03-17_106_IMG_9269.JPG"
+# image_file = "Triturus cristatus_male_4_2025-03-18_161_IMG_9396.JPG"
 img = skiio.imread(image_file)
 
 show(img, title = "raw photo")
@@ -453,7 +455,31 @@ The coordinates of the yellow ventral marking give a good general direction.
 And the crop range.
 
 But first, bring that direction to a default by rotating it.
+Before, get the direction. PCA can help. `skimage` has all the tools.
 
+
+```{python regionprops}
+
+props = skimeas.regionprops_table(
+    np.array(yellow_mask, dtype = int),
+    properties=('centroid', 'orientation', 'axis_major_length', 'axis_minor_length'),
+)
+
+# we get two centroids: centroid-0 is that of the void, centroid-1 that of the mask.
+
+rotated_newt = skitrafo.rotate(cropped_newt, props["orientation"][0], center = props["centroid-1"])
+rotated_yellow = skitrafo.rotate(yellow_mask, props["orientation"][0], center = props["centroid-1"])
+
+standard_newt = crop_mask(rotated_newt, rotated_yellow, return_crop_mask = False, extend_px = int(-props["axis_minor_length"][0]/2))
+
+show(standard_newt)
+plt.show()
+
+```
+
+
+You can go further by cropping the limbs even more.
+but that would definitely not be nice, eh!
 
 
 

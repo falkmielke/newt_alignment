@@ -626,6 +626,11 @@ ax.plot(xt, yt); plt.show()
 It should be possible to use these parameters to warp a sheared image back to normal, 
 prior to newt detection.
 
+See also: 
+
+- <https://en.wikipedia.org/wiki/Ellipse#General_ellipse_2>
+- <https://math.stackexchange.com/a/1217797>
+
 
 But maybe warping is unnecessary:
 
@@ -644,8 +649,8 @@ See this example:
 
 The above was a lot of exploration.
 
-- Make sure the automatic newt rotation above works consistently (angles are tricky).
+- Make sure the heuristic relmax-threshold above generalizes.
+- Make sure the automatic newt rotation above works consistently on more examples (angles are tricky).
 - You would want to extract the crucial steps and assemble them in a function.
-- Generalization is needed; especially for finding the `yellow` pattern.
-- Roll out to whole folders of images.
-- Explore further!
+- Roll out image standardized cropping to whole folders of images; more testing.
+- Explore further: feature matching, warping.

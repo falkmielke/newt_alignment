@@ -13,17 +13,11 @@ knitr:
 ---
 
 
-# Procedure
+# python virtual environment
 
-- load image
-- exposure normalization
-- find features (blobs? yellow?)
-- rotate rostro-caudal axis
-- crop
-- save
+A `venv` is the easiest way to get a reproducible environment on linux.
+On windows, you might be better off with a [micromamba environment](https://mamba.readthedocs.io/en/latest/user_guide/micromamba.html).
 
-
-# pyenv
 
 ```{sh setup-virtual-environment}
 #| eval: false
@@ -40,16 +34,21 @@ pip install --upgrade pip
 pip install --upgrade -r requirements.txt
 ```
 
+
 # start python
 
 ```{sh start-python}
 #| eval: false
-source newts/bin/activate.fish
+source newts/bin/activate.fish # or something like: `conda activate`
 python
 
 ```
 
+
+Here we go!
+
 ```{python libraries}
+import os as os
 import numpy as np
 import pandas as pd
 import scipy.ndimage as ndi
@@ -61,6 +60,7 @@ import skimage.morphology as skimorph
 import skimage.measure as skimeas
 import skimage.segmentation as skiseg
 import skimage.transform as skitrafo
+import skimage.util as skiutil
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
@@ -69,7 +69,10 @@ mpl.use("gtk4agg") # does not matter much; defaults / TkAgg has trouble with my 
 
 ```
 
+
 # helper function
+
+Below, we plot all the time; this makes it a one-liner.
 
 ```{python show-function}
 
@@ -97,8 +100,12 @@ def show(img, ax = None, **kwargs):
 ## raw
 
 ```{python load-image}
-image_file = "Triturus cristatus_female_4_2025-03-17_106_IMG_9269.JPG"
+## I also flipped the test images to see whether the head direction is good.
+#  procedure tested on all four files.
+# image_file = "Triturus cristatus_female_4_2025-03-17_106_IMG_9269.JPG"
+# image_file = "Triturus cristatus_female_4_2025-03-17_106_IMG_9269_.JPG"
 # image_file = "Triturus cristatus_male_4_2025-03-18_161_IMG_9396.JPG"
+image_file = "Triturus cristatus_male_4_2025-03-18_161_IMG_9396_.JPG"
 img = skiio.imread(image_file)
 
 show(img, title = "raw photo")
@@ -205,10 +212,10 @@ label_image = skimorph.label(bw)
 
 biggest = np.argmax([region.area for region in skimeas.regionprops(label_image)])
 # plt.imshow(label_image == int(1+biggest)); plt.show()
-mask = skimorph.convex_hull_image(label_image == int(1+biggest))
+dish_mask = skimorph.convex_hull_image(label_image == int(1+biggest))
 # to make the background transparent, pass the value of `bg_label`,
 # and leave `bg_color` as `None` and `kind` as `overlay`
-image_label_overlay = skicol.label2rgb(mask, image=img, bg_label=0)
+image_label_overlay = skicol.label2rgb(dish_mask, image=img, bg_label=0)
 
 
 show(image_label_overlay, title = "petri dish mask")
@@ -218,7 +225,7 @@ plt.show()
 
 ```{python mask-image}
 img_masked = img_hsv[:, :, 2]
-img_masked[np.logical_not(mask)] = 1.
+img_masked[np.logical_not(dish_mask)] = 1.
 
 show(img_masked, title = "petri dish only")
 plt.show()
@@ -276,6 +283,10 @@ separating "the relevant" from "the irrelevant" (no offence to petri dish manufa
 - <https://scikit-image.org/docs/stable/auto_examples/segmentation/plot_label.html#sphx-glr-auto-examples-segmentation-plot-label-py>
 
 
+Some call it "ROI". 
+Here, it's the animal.
+
+
 ```{python labels}
 
 # reminder: `img_masked` is the "V" in "HSV", masked so that only the petri dish is shown.
@@ -297,41 +308,6 @@ image_label_overlay = skicol.label2rgb(newt_mask, image=img, bg_label=0)
 show(image_label_overlay, title = "lonely newt")
 plt.show()
 ```
-
-
-... or immediately turn to the fancy stuff?
-- <https://scikit-image.org/docs/stable/auto_examples/segmentation/plot_morphsnakes.html#sphx-glr-auto-examples-segmentation-plot-morphsnakes-py>
-
-```{python snakes-for-newts}
-#| eval: false
-
-mod = 1. - img_masked # the inverted "V" channel
-
-init_ls = skiseg.checkerboard_level_set(mod.shape, 8)
-
-# fig, ax = plt.subplots(1, 1)
-# ax.imshow(init_ls)
-# ax.set_axis_off()
-# ax.set_title("init")
-# plt.show()
-
-
-ls = skiseg.morphological_chan_vese(
-    mod,
-    num_iter=16,
-    init_level_set=init_ls,
-    smoothing=11
-)
-
-
-show(ls, title = "morphological snakes")
-plt.show()
-```
-
-Oh, wow, that takes a bit, but the result is mildly promising.
-
-
-Anyways, I will stick with the "simple newt label" for now.
 
 
 
@@ -425,7 +401,7 @@ downbins = sig.argrelmin(histogram_change)[0]
 downbin_values = histogram_change[downbins]
 right_ramp_bin = downbins[downbin_values < -5000][-1]
 
-threshold = edges[right_ramp_bin] + 0.1
+threshold = edges[right_ramp_bin] + 0.1 # CAREFUL: this +0.1 could crash. Dangerous heuristic (N=2).
 
 plt.hist(saturation.ravel(), bins = 256)
 plt.axvline(threshold)
@@ -466,7 +442,7 @@ Before, get the direction. PCA can help. `skimage` has all the tools.
 ```{python regionprops}
 
 props = skimeas.regionprops(
-    np.array(yellow_mask, dtype = int),
+    np.array(cropped_mask, dtype = int),
     intensity_image = cropped_newt
 )[0]
 #    properties=('area', 'area_bbox', 'area_convex', 'area_filled', 'axis_major_length', 'axis_minor_length', 'bbox', 'centroid', 'centroid_local', 'centroid_weighted', 'centroid_weighted_local', 'coords', 'coords_scaled', 'eccentricity', 'equivalent_diameter_area', 'euler_number', 'extent', 'feret_diameter_max', 'image', 'image_convex', 'image_filled', 'image_intensity', 'inertia_tensor', 'inertia_tensor_eigvals', 'intensity_max', 'intensity_mean', 'intensity_min', 'intensity_std', 'label', 'moments', 'moments_central', 'moments_hu', 'moments_normalized', 'moments_weighted', 'moments_weighted_central', 'moments_weighted_hu', 'moments_weighted_normalized', 'num_pixels', 'orientation', 'perimeter', 'perimeter_crofton', 'slice', 'solidity'),
@@ -485,29 +461,40 @@ convert_prop_bbox = lambda bx: \
 ```
 
 
+Rotation is a bit fishy. 
+Try it with more images!
+
 ```{python rotate-newt}
 
-get_aspect = lambda b: (b[2]-b[0])/(b[3]-b[1])
+get_aspect = lambda bbox: (bbox[2]-bbox[0])/(bbox[3]-bbox[1]) # vertical extent / horizontal extent
 is_vertical = lambda props: get_aspect(props["bbox"]) > 1.0
 com_vertical = lambda props: props["centroid"][0] / (props["bbox"][2]-props["bbox"][0])
 com_horizontal = lambda props: props["centroid"][1] / (props["bbox"][3]-props["bbox"][1])
 # aspect = get_aspect(props["bbox"])
 def get_angle(props):
     angle = props["orientation"]*180/np.pi
+    # props["orientation"] defined as angle against the vertical axis
+    # in a range of [-90, 90]
+
     if is_vertical(props):
         # (A) north-south orientation
-        angle += 90
+        angle -= 90 # for getting it to horizontal
 
-        # is the head down or up?
-        head_down = com_vertical(props) > 0.5
-        if head_down:
-            angle += 180
+        # was the head down or up?
+        head_up = com_vertical(props) < 0.5
+        if head_up:
+            angle += 180 # if up, turn by 180deg.
+
     else:
-        # (B) ost-west orientation
-        # check head right
-        head_left = com_horizontal(props) < 0.5
-        if head_left:
-            angle += 180
+        pass
+        # (B) ost-west (horizontal) orientation
+        # there are issues at the +/- 90deg discontinuity.
+        angle -= 90 # bring angle to [0, 180] interval
+
+        # # check head right
+        # head_right = com_horizontal(props) > 0.5
+        # if head_right:
+        #     angle += 180 # might be spinning in circles: double-check!
 
     return(angle)
 
@@ -554,7 +541,7 @@ but that would definitely not be nice, eh!
 
 If the tail is an issue: use the centroid and the bbox.
 
-```{r}
+```{python crop-body}
 
 rprops = skimeas.regionprops(np.array(rotated_ymask, dtype = int))[0]
 
@@ -564,10 +551,10 @@ dx = min(abs(bbox[[0,2]]-centroid[0]))
 dy = min(abs(bbox[[1,3]]-centroid[1]))
 
 body_box = {
-        "min_x": int(centroid[0]-dx),
-        "max_x": int(centroid[0]+dx),
-        "min_y": int(centroid[1]-dy),
-        "max_y": int(centroid[1]+dy)
+    "min_x": int(centroid[0]-dx),
+    "max_x": int(centroid[0]+dx),
+    "min_y": int(centroid[1]-dy),
+    "max_y": int(centroid[1]+dy)
     }
 
 final_crop = crop(rotated_newt, body_box)
@@ -576,6 +563,89 @@ show(final_crop); plt.show()
 ```
 
 
+# save image
+
+that's simple, ...
+but then, there are filetypes:
+
+```{python save-cut}
+def out_file(in_file):
+    filename, file_extension = os.path.splitext(in_file)
+    return(f"{filename}_cropped{file_extension}")
+
+skiio.imsave(fname = out_file(image_file),
+    arr = skiutil.img_as_ubyte(final_crop)
+)
+
+```
+
+
 # Affine Transform
 
 - <https://scikit-image.org/docs/stable/api/skimage.transform.html#skimage.transform.AffineTransform>
+- <https://scikit-image.org/docs/dev/api/skimage.measure.html#skimage.measure.EllipseModel>
+
+Because the animal can bend its spine, move its appendices, and twist, 
+there is little chance of computationally finding the perspective skew based on the animal.
+(You *could* find the feet and warp them to a rectangle, but that distorts the belly.)
+
+Luckily, we can fall back to the petri dish, **which is a good approximation of a circle**.
+The only problem: it is cut asymmetrically on the image edge,
+so properties like `props["eccentricity"]` will not work.
+
+
+You could also try 
+<https://scikit-image.org/docs/stable/auto_examples/edges/plot_circular_elliptical_hough_transform.html#ellipse-detection>
+
+
+
+```{python dish-mask}
+
+dish_edge = skifilt.sobel(dish_mask)
+
+show(dish_edge); plt.show()
+
+dish_edge_coords = np.stack(np.where(dish_edge), axis = 1)
+ellipse = skimeas.EllipseModel()
+ellipse.estimate(dish_edge_coords)
+xc, yc, a, b, theta = ellipse.params
+
+```
+
+```{python fit-ellipse}
+t = np.linspace(0., 2*np.pi, 1001, endpoint = True)
+xt = xc + a*np.cos(theta)*np.cos(t) - b*np.sin(theta)*np.sin(t)
+yt = yc + a*np.sin(theta)*np.cos(t) + b*np.cos(theta)*np.sin(t)
+fig, ax = plt.subplots(1, 1)
+ax.set_aspect("equal")
+ax.plot(xt, yt); plt.show()
+
+```
+
+
+It should be possible to use these parameters to warp a sheared image back to normal, 
+prior to newt detection.
+
+
+But maybe warping is unnecessary:
+
+
+# Feature Matching
+
+`scikit image` has great algorithms to match features.
+This might enable auto-matching of images!
+
+See this example:
+
+- <https://scikit-image.org/docs/stable/auto_examples/features_detection/plot_orb.html#sphx-glr-auto-examples-features-detection-plot-orb-py>
+
+
+# Further Steps
+
+The above was a lot of exploration.
+
+- Make sure the automatic newt rotation above works consistently (angles are tricky).
+- You would want to extract the crucial steps and assemble them in a function.
+- Generalization is needed; especially for finding the `yellow` pattern.
+- Roll out to whole folders of images.
+- Explore further!

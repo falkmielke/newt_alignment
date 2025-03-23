@@ -65,7 +65,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 # mpl.use("TkAgg")
-mpl.use("gtk4agg")
+mpl.use("gtk4agg") # does not matter much; defaults / TkAgg has trouble with my screen
 
 ```
 
@@ -211,7 +211,6 @@ mask = skimorph.convex_hull_image(label_image == int(1+biggest))
 image_label_overlay = skicol.label2rgb(mask, image=img, bg_label=0)
 
 
-
 show(image_label_overlay, title = "petri dish mask")
 plt.show()
 ```
@@ -228,6 +227,8 @@ plt.show()
 
 # Image Differentials
 
+## channel difference
+
 First of all, we can subtract channels:
 
 ```{python rb-diff}
@@ -240,6 +241,8 @@ plt.show()
 ... but the problem is the background.
 It might work better with some blur, though (not tested).
 
+
+## edges
 
 Then, there are spatial differentials:
 
@@ -255,7 +258,7 @@ plt.show()
 ```
 
 
-## not pursued
+## not pursued: scaling, unsharp mask
 
 the image could be scaled down
 `image_rescaled = rescale(image, 0.25, anti_aliasing=False)`
@@ -275,6 +278,8 @@ separating "the relevant" from "the irrelevant" (no offence to petri dish manufa
 
 ```{python labels}
 
+# reminder: `img_masked` is the "V" in "HSV", masked so that only the petri dish is shown.
+# We invert to find the newt as the "highlight" object.
 mod = 1. - img_masked
 
 # apply threshold
@@ -460,17 +465,82 @@ Before, get the direction. PCA can help. `skimage` has all the tools.
 
 ```{python regionprops}
 
-props = skimeas.regionprops_table(
+props = skimeas.regionprops(
     np.array(yellow_mask, dtype = int),
-    properties=('centroid', 'orientation', 'axis_major_length', 'axis_minor_length'),
-)
+    intensity_image = cropped_newt
+)[0]
+#    properties=('area', 'area_bbox', 'area_convex', 'area_filled', 'axis_major_length', 'axis_minor_length', 'bbox', 'centroid', 'centroid_local', 'centroid_weighted', 'centroid_weighted_local', 'coords', 'coords_scaled', 'eccentricity', 'equivalent_diameter_area', 'euler_number', 'extent', 'feret_diameter_max', 'image', 'image_convex', 'image_filled', 'image_intensity', 'inertia_tensor', 'inertia_tensor_eigvals', 'intensity_max', 'intensity_mean', 'intensity_min', 'intensity_std', 'label', 'moments', 'moments_central', 'moments_hu', 'moments_normalized', 'moments_weighted', 'moments_weighted_central', 'moments_weighted_hu', 'moments_weighted_normalized', 'num_pixels', 'orientation', 'perimeter', 'perimeter_crofton', 'slice', 'solidity'),
 
-# we get two centroids: centroid-0 is that of the void, centroid-1 that of the mask.
+# print(yellow_mask.shape)
+# print(props["centroid"])
+# print(props["inertia_tensor"])
+# print(props["orientation"])
+# print(props["bbox"])
 
-rotated_newt = skitrafo.rotate(cropped_newt, props["orientation"][0], center = props["centroid-1"])
-rotated_yellow = skitrafo.rotate(yellow_mask, props["orientation"][0], center = props["centroid-1"])
+# just in case: convert a prop bbox to dict bbox
+convert_prop_bbox = lambda bx: \
+    {"min_x": bx[0], "min_y": bx[1], "max_x": bx[2], "max_y": bx[3]}
 
-standard_newt = crop_mask(rotated_newt, rotated_yellow, return_crop_mask = False, extend_px = int(-props["axis_minor_length"][0]/2))
+
+```
+
+
+```{python rotate-newt}
+
+get_aspect = lambda b: (b[2]-b[0])/(b[3]-b[1])
+is_vertical = lambda props: get_aspect(props["bbox"]) > 1.0
+com_vertical = lambda props: props["centroid"][0] / (props["bbox"][2]-props["bbox"][0])
+com_horizontal = lambda props: props["centroid"][1] / (props["bbox"][3]-props["bbox"][1])
+# aspect = get_aspect(props["bbox"])
+def get_angle(props):
+    angle = props["orientation"]*180/np.pi
+    if is_vertical(props):
+        # (A) north-south orientation
+        angle += 90
+
+        # is the head down or up?
+        head_down = com_vertical(props) > 0.5
+        if head_down:
+            angle += 180
+    else:
+        # (B) ost-west orientation
+        # check head right
+        head_left = com_horizontal(props) < 0.5
+        if head_left:
+            angle += 180
+
+    return(angle)
+
+# skimage returns orientation in radians, but rotates with degrees :/
+rotate_orientation = lambda img, props: \
+    skitrafo.rotate(img, -get_angle(props), resize = True, center = props["centroid"])
+    
+
+rotated_newt = rotate_orientation(cropped_newt, props)
+
+# fig, axarr = plt.subplots(1, 2)
+# show(cropped_newt, axarr[0])
+# show(rotated_newt, axarr[1])
+# plt.show()
+
+rotated_mask = rotate_orientation(cropped_mask, props)
+rotated_ymask = rotate_orientation(yellow_mask, props)
+
+
+rotated_overlay = skicol.label2rgb(
+    np.array(rotated_mask, dtype = int) +
+    np.array(rotated_ymask, dtype = int)
+    , image = rotated_newt, bg_label=0)
+
+show(rotated_overlay); plt.show()
+
+```
+
+
+```{python crop-rotated}
+
+
+standard_newt = crop_mask(rotated_newt, rotated_ymask, return_crop_mask = False, extend_px = 0)
 
 show(standard_newt)
 plt.show()
@@ -482,4 +552,30 @@ You can go further by cropping the limbs even more.
 but that would definitely not be nice, eh!
 
 
+If the tail is an issue: use the centroid and the bbox.
 
+```{r}
+
+rprops = skimeas.regionprops(np.array(rotated_ymask, dtype = int))[0]
+
+centroid = rprops["centroid"] # area centroid without intensity weighting
+bbox = np.array(rprops["bbox"])
+dx = min(abs(bbox[[0,2]]-centroid[0]))
+dy = min(abs(bbox[[1,3]]-centroid[1]))
+
+body_box = {
+        "min_x": int(centroid[0]-dx),
+        "max_x": int(centroid[0]+dx),
+        "min_y": int(centroid[1]-dy),
+        "max_y": int(centroid[1]+dy)
+    }
+
+final_crop = crop(rotated_newt, body_box)
+
+show(final_crop); plt.show()
+```
+
+
+# Affine Transform
+
+- <https://scikit-image.org/docs/stable/api/skimage.transform.html#skimage.transform.AffineTransform>
